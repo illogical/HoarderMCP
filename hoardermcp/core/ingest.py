@@ -9,12 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from langchain.text_splitter import (
-    RecursiveCharacterTextSplitter,
-    Language,
-)
+from langchain.text_splitter import Language
 from pydantic import BaseModel, Field, HttpUrl
 
+from .chunking import ChunkingConfig, ChunkingFactory, ChunkingStrategy
 from ..models.document import Document, DocumentChunk, DocumentMetadata, DocumentType
 from ..storage import VectorStore, VectorStoreFactory, VectorStoreConfig
 
@@ -23,79 +21,27 @@ logger = logging.getLogger(__name__)
 # Default chunking parameters
 DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_CHUNK_OVERLAP = 200
-
-# Language-specific splitters
-LANGUAGE_SPLITTERS = {
-    DocumentType.PYTHON: {
-        "language": Language.PYTHON,
-        "separators": [
-            "\n\n\n",
-            "\n\n",
-            "\n",
-            " ",
-            "",
-        ],
-    },
-    DocumentType.CSHARP: {
-        "language": Language.CSHARP,
-        "separators": [
-            "\n\n\n",
-            "\n\n",
-            "\n",
-            " ",
-            "",
-        ],
-    },
-    DocumentType.MARKDOWN: {
-        "separators": [
-            "\n# ",
-            "\n## ",
-            "\n### ",
-            "\n\n",
-            "\n",
-            " ",
-            "",
-        ]
-    },
-}
-
-# Default text splitter configuration
-DEFAULT_SPLITTER_CONFIG = {
-    "separators": ["\n\n", "\n", " ", ""],
-    "keep_separator": True,
-    "is_separator_regex": False,
-}
+DEFAULT_CHUNKING_STRATEGY = ChunkingStrategy.SEMANTIC
 
 
-class ChunkingConfig(BaseModel):
-    """Configuration for document chunking."""
-
-    chunk_size: int = Field(
-        DEFAULT_CHUNK_SIZE,
-        description="Maximum size of each chunk in characters",
-        gt=0,
-    )
-    chunk_overlap: int = Field(
-        DEFAULT_CHUNK_OVERLAP,
-        description="Number of characters to overlap between chunks",
-        ge=0,
-    )
+class ChunkingConfig(ChunkingConfig):
+    """Extended configuration for document chunking.
+    
+    This class extends the base ChunkingConfig to add additional fields
+    specific to the ingestion service.
+    """
+    
     length_function: str = Field(
         "len",
         description="Function to use for calculating text length (e.g., 'len' or 'token_counter')",
-    )
-    keep_separator: bool = Field(
-        True,
-        description="Whether to keep the separators in the chunks",
     )
     add_start_index: bool = Field(
         False,
         description="Whether to add the start index of each chunk to its metadata",
     )
-
+    
     class Config:
         """Pydantic config."""
-
         extra = "forbid"
         use_enum_values = True
 
@@ -279,7 +225,7 @@ class IngestService:
         )
 
     def _chunk_document(self, document: Document) -> List[DocumentChunk]:
-        """Split a document into chunks.
+        """Split a document into chunks using the configured strategy.
 
         Args:
             document: Document to chunk.
@@ -287,38 +233,23 @@ class IngestService:
         Returns:
             List of document chunks.
         """
-        content_type = document.metadata.content_type
-        content = document.content
-
-        # Get splitter configuration
-        splitter_config = LANGUAGE_SPLITTERS.get(content_type, DEFAULT_SPLITTER_CONFIG)
-
-        # Create text splitter
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.chunking_config.chunk_size,
-            chunk_overlap=self.chunking_config.chunk_overlap,
-            length_function=len,  # TODO: Support token counting
-            **splitter_config,
+        # Create chunker based on document type and configuration
+        chunker = ChunkingFactory.get_chunker(
+            doc_type=document.metadata.content_type,
+            config=ChunkingConfig(
+                strategy=ChunkingStrategy.SEMANTIC,
+                chunk_size=self.chunking_config.chunk_size,
+                chunk_overlap=self.chunking_config.chunk_overlap,
+                max_tokens=self.chunking_config.max_tokens,
+                language={
+                    DocumentType.PYTHON: Language.PYTHON,
+                    DocumentType.CSHARP: Language.CSHARP,
+                }.get(document.metadata.content_type),
+            ),
         )
-
-        # Split text
-        texts = text_splitter.split_text(content)
-
-        # Create chunks
-        chunks = []
-        for i, text in enumerate(texts):
-            chunk_id = f"{document.id}_chunk_{i}"
-            chunk = DocumentChunk(
-                id=chunk_id,
-                document_id=document.id,
-                content=text,
-                metadata=document.metadata.copy(),
-                chunk_index=i,
-                chunk_count=len(texts),
-            )
-            chunks.append(chunk)
-
-        return chunks
+        
+        # Split document into chunks
+        return chunker.chunk_document(document)
 
     async def _generate_embeddings(
         self, chunks: List[DocumentChunk], **kwargs

@@ -41,8 +41,6 @@
     - [x] Test error handling and retry logic
     - [x] Test sitemap discovery and parsing
     - [x] Test document conversion
-- [ ] Implement scheduled crawling
-- [ ] Implement incremental updates for crawled content
 - [x] Simplify deployment and dependencies to a single dockerfile for the API and MCP server
   - [x] Create a multi-stage Dockerfile for production
   - [x] Set up Docker Compose with all dependencies (Milvus, etcd, MinIO)
@@ -50,9 +48,12 @@
   - [x] Create deployment documentation
 
 ### Content Processing
-- [ ] Enhance content extraction for different document types
 - [ ] Implement better chunking strategies for code and markdown
-- [ ] Add language detection for better processing
+  - [ ] Add semantic chunking for markdown with header-based splitting
+  - [ ] Implement code-aware chunking for programming languages
+  - [ ] Add overlap between chunks for better context
+  - [ ] Implement chunk size optimization based on token count
+  - [ ] Add tests for chunking strategies
 
 ### Documentation
 - [ ] Create usage examples and tutorials
@@ -86,6 +87,29 @@
 - [ ] Add integration tests for API endpoints
 - [ ] Set up CI/CD pipeline
 - [ ] Add performance benchmarking
+
+## Stretch Goals
+
+### Features
+- [ ] Implement scheduled crawling
+  - [ ] Create Scheduler class with async support
+  - [ ] Add support for cron-style scheduling
+  - [ ] Implement persistent job storage
+  - [ ] Add API endpoints for managing scheduled jobs
+  - [ ] Add validation for schedule patterns
+  - [ ] Implement job status tracking and history
+  - [ ] Add error handling and retries for failed jobs
+  - [ ] Add tests for scheduler functionality
+
+### Content Processing
+- [ ] Implement incremental updates for crawled content
+  - [ ] Add last_modified tracking for crawled content
+  - [ ] Implement change detection for updated content
+  - [ ] Add support for ETags and If-Modified-Since headers
+  - [ ] Create diffing mechanism for partial updates
+  - [ ] Add incremental update scheduling
+  - [ ] Implement cleanup of stale content
+  - [ ] Add tests for incremental update functionality
 
 ## Notes
 - Follow the established code style and documentation standards

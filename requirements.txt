@@ -9,6 +9,7 @@ httpx>=0.24.0
 crawl4ai>=0.5.0
 beautifulsoup4>=4.12.0
 markdownify>=0.11.6
+lxml>=4.9.0
 
 # Vector Storage and Embeddings
 pymilvus>=2.3.0
@@ -17,6 +18,10 @@ torch>=2.0.0
 
 # Langfuse Integration (optional)
 langfuse>=2.0.0
+
+# Text Processing and Chunking
+langchain>=0.0.267
+markdown>=3.4.0
 
 # Async Support
 aiohttp>=3.8.4
