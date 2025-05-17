@@ -1,107 +1,428 @@
-"""Sitemap crawler for HoarderMCP."""
+"""Sitemap crawler for HoarderMCP.
+
+This module provides functionality to crawl and parse sitemaps, including sitemap indexes,
+and extract URLs with their metadata. It supports both XML sitemaps and sitemap indexes.
+"""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Union
-from urllib.parse import urljoin, urlparse
+from enum import Enum
+from typing import Dict, List, Optional, Set, Tuple, Union, Any
+from urllib.parse import urlparse, urljoin, urlunparse
 
-import httpx
-from pydantic import HttpUrl
+import aiohttp
+from pydantic import BaseModel, Field, HttpUrl
 
-from .crawler import Crawler, CrawlOptions, CrawlResult
+from ..models import Document, DocumentMetadata, DocumentType
 
 logger = logging.getLogger(__name__)
 
+# Common sitemap locations to check
+COMMON_SITEMAP_PATHS = [
+    '/sitemap.xml',
+    '/sitemap_index.xml',
+    '/sitemap/sitemap.xml',
+    '/sitemap-index.xml',
+    '/sitemap/sitemap_index.xml',
+]
+
+# XML namespaces for sitemaps
+SITEMAP_NS = {
+    'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9',
+    'image': 'http://www.google.com/schemas/sitemap-image/1.1',
+    'video': 'http://www.google.com/schemas/sitemap-video/1.1',
+}
+
+# Register namespaces for pretty printing
+for prefix, uri in SITEMAP_NS.items():
+    ET.register_namespace(prefix, uri)
+
 
 @dataclass
-class SitemapEntry:
-    """A single entry in a sitemap."""
-
+class SitemapUrl:
+    """Represents a URL entry in a sitemap with extended metadata."""
+    
     loc: str
-    "URL of the page"
-
-    lastmod: Optional[datetime] = None
-    "When the page was last modified"
-
+    """The URL of the page."""
+    
+    lastmod: Optional[str] = None
+    """The date of last modification of the file (ISO 8601 format)."""
+    
     changefreq: Optional[str] = None
-    "How frequently the page is likely to change"
-
+    """How frequently the page is likely to change."""
+    
     priority: Optional[float] = None
-    "Priority of this URL relative to other URLs on the site"
-
+    """Priority of this URL relative to other URLs on the site (0.0 to 1.0)."""
+    
+    images: List[Dict[str, str]] = field(default_factory=list)
+    """List of images associated with this URL."""
+    
+    videos: List[Dict[str, Any]] = field(default_factory=list)
+    """List of videos associated with this URL."""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a dictionary for serialization.
+        
+        Returns:
+            Dictionary representation of the sitemap URL.
+        """
+        return {
+            "loc": self.loc,
+            "lastmod": self.lastmod,
+            "changefreq": self.changefreq,
+            "priority": self.priority,
+            "images": self.images or [],
+            "videos": self.videos or [],
+        }
+    
     @classmethod
-    def from_xml_element(cls, element: ET.Element) -> Optional[SitemapEntry]:
-        """Create a SitemapEntry from an XML element.
-
+    def from_xml_element(cls, element: ET.Element) -> Optional[SitemapUrl]:
+        """Create a SitemapUrl from an XML element.
+        
         Args:
             element: XML element from a sitemap.
-
+            
         Returns:
-            SitemapEntry if the element is valid, None otherwise.
+            SitemapUrl if the element is valid, None otherwise.
         """
-        # Sitemap namespaces
-        ns = {"ns": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-
         # Extract URL
-        loc_elem = element.find("ns:loc", ns)
+        loc_elem = element.find("sm:loc", SITEMAP_NS)
         if loc_elem is None or not loc_elem.text:
             return None
-
+            
         entry = cls(loc=loc_elem.text.strip())
-
+        
         # Extract last modification date
-        lastmod_elem = element.find("ns:lastmod", ns)
+        lastmod_elem = element.find("sm:lastmod", SITEMAP_NS)
         if lastmod_elem is not None and lastmod_elem.text:
-            try:
-                entry.lastmod = datetime.fromisoformat(
-                    lastmod_elem.text.replace("Z", "+00:00")
-                )
-            except (ValueError, AttributeError):
-                pass
-
+            entry.lastmod = lastmod_elem.text.strip()
+        
         # Extract change frequency
-        changefreq_elem = element.find("ns:changefreq", ns)
+        changefreq_elem = element.find("sm:changefreq", SITEMAP_NS)
         if changefreq_elem is not None and changefreq_elem.text:
             entry.changefreq = changefreq_elem.text.lower().strip()
-
+        
         # Extract priority
-        priority_elem = element.find("ns:priority", ns)
+        priority_elem = element.find("sm:priority", SITEMAP_NS)
         if priority_elem is not None and priority_elem.text:
             try:
                 entry.priority = float(priority_elem.text)
             except (ValueError, TypeError):
                 pass
-
+        
+        # Extract images
+        for img_elem in element.findall(".//image:image", SITEMAP_NS):
+            img_loc = img_elem.find("image:loc", SITEMAP_NS)
+            if img_loc is not None and img_loc.text:
+                img = {"loc": img_loc.text.strip()}
+                
+                # Add optional image attributes
+                for attr in ["caption", "geo_location", "title", "license"]:
+                    elem = img_elem.find(f"image:{attr}", SITEMAP_NS)
+                    if elem is not None and elem.text:
+                        img[attr] = elem.text.strip()
+                        
+                entry.images.append(img)
+        
+        # Extract videos
+        for video_elem in element.findall(".//video:video", SITEMAP_NS):
+            video = {}
+            
+            # Add video attributes
+            for attr in ["thumbnail_loc", "title", "description", "content_loc", "player_loc"]:
+                elem = video_elem.find(f"video:{attr}", SITEMAP_NS)
+                if elem is not None and elem.text:
+                    video[attr] = elem.text.strip()
+            
+            # Add duration if present
+            duration_elem = video_elem.find("video:duration", SITEMAP_NS)
+            if duration_elem is not None and duration_elem.text:
+                try:
+                    video["duration"] = int(duration_elem.text)
+                except (ValueError, TypeError):
+                    pass
+                    
+            if video:
+                entry.videos.append(video)
+        
         return entry
-
-    def to_dict(self) -> Dict:
-        """Convert to a dictionary.
-
-        Returns:
-            Dictionary representation of the sitemap entry.
-        """
-        return {
-            "loc": self.loc,
-            "lastmod": self.lastmod.isoformat() if self.lastmod else None,
-            "changefreq": self.changefreq,
-            "priority": self.priority,
-        }
 
 
 class SitemapCrawler:
-    """Crawler for sitemap.xml files."""
+    """Crawler for sitemap.xml files with support for sitemap indexes and nested sitemaps.
+    
+    This crawler can discover sitemaps from a website's robots.txt, common sitemap locations,
+    or directly from a provided sitemap URL. It handles both standard sitemaps and sitemap indexes.
+    """
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(
+        self, 
+        base_url: str, 
+        session: Optional[aiohttp.ClientSession] = None,
+        max_retries: int = 3,
+        request_timeout: int = 30,
+    ):
         """Initialize the sitemap crawler.
 
         Args:
-            base_url: Base URL of the website (used for relative URLs).
+            base_url: Base URL of the website or direct sitemap URL.
+            session: Optional aiohttp ClientSession to reuse
+            max_retries: Maximum number of retries for failed requests
+            request_timeout: Timeout for HTTP requests in seconds
         """
-        self.base_url = base_url
+        self.base_url = self._normalize_url(base_url)
+        self.domain = urlparse(self.base_url).netloc
+        self.session = session or aiohttp.ClientSession()
+        self.max_retries = max_retries
+        self.request_timeout = request_timeout
+        self.visited_urls: Set[str] = set()
+        self.discovered_sitemaps: Set[str] = set()
+        self.sitemap_urls: List[SitemapUrl] = []
+        
+    async def __aenter__(self):
+        """Async context manager entry."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit.
+        
+        Note: Does not close the session if it was passed in.
+        """
+        if self.session and not getattr(self, '_external_session', False):
+            await self.session.close()
+            
+    @staticmethod
+    def _normalize_url(url: str) -> str:
+        """Normalize URL by removing fragments and query parameters."""
+        parsed = urlparse(url)
+        return urlunparse((
+            parsed.scheme or "https",
+            parsed.netloc,
+            parsed.path.rstrip("/") or "/",
+            "",  # params
+            "",  # query
+            "",  # fragment
+        ))
+        
+    async def discover_sitemaps(self) -> List[str]:
+        """Discover sitemap files for the given base URL.
+        
+        Returns:
+            List of discovered sitemap URLs.
+        """
+        sitemap_urls = set()
+        
+        # Check common sitemap locations
+        tasks = []
+        for path in COMMON_SITEMAP_PATHS:
+            sitemap_url = urljoin(self.base_url, path)
+            tasks.append(self._check_sitemap_url(sitemap_url))
+        
+        # Also check robots.txt for sitemap references
+        tasks.append(self._check_robots_txt())
+        
+        # Run all checks in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        for result in results:
+            if isinstance(result, list):
+                sitemap_urls.update(result)
+        
+        self.discovered_sitemaps = sitemap_urls
+        return list(sitemap_urls)
+    
+    async def _check_robots_txt(self) -> List[str]:
+        """Check robots.txt for sitemap references."""
+        robots_url = urljoin(self.base_url, "/robots.txt")
+        try:
+            async with self.session.get(robots_url, timeout=self.request_timeout) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    # Find all Sitemap directives
+                    sitemap_urls = []
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if line.lower().startswith("sitemap:"):
+                            sitemap_url = line[8:].strip()
+                            sitemap_urls.append(sitemap_url)
+                    return sitemap_urls
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.debug(f"Failed to fetch robots.txt: {e}")
+        return []
+    
+    async def _check_sitemap_url(self, url: str) -> List[str]:
+        """Check if a URL points to a valid sitemap."""
+        try:
+            async with self.session.head(url, timeout=self.request_timeout) as response:
+                if response.status == 200 and \
+                   response.headers.get("Content-Type", "").startswith(("application/xml", "text/xml")):
+                    return [url]
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.debug(f"Failed to check sitemap URL {url}: {e}")
+        return []
+    
+    async def crawl(self) -> List[SitemapUrl]:
+        """Crawl and parse all discovered sitemaps.
+        
+        Returns:
+            List of SitemapUrl objects from all sitemaps.
+        """
+        # First discover sitemaps if not already done
+        if not self.discovered_sitemaps:
+            await self.discover_sitemaps()
+        
+        if not self.discovered_sitemaps:
+            logger.warning(f"No sitemaps found for {self.base_url}")
+            return []
+        
+        # Parse all sitemaps in parallel
+        tasks = [self.parse_sitemap(url) for url in self.discovered_sitemaps]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Flatten and deduplicate results
+        all_urls = []
+        seen = set()
+        
+        for result in results:
+            if isinstance(result, list):
+                for url in result:
+                    if url.loc not in seen:
+                        seen.add(url.loc)
+                        all_urls.append(url)
+        
+        self.sitemap_urls = all_urls
+        return all_urls
+    
+    async def parse_sitemap(self, sitemap_url: str) -> List[SitemapUrl]:
+        """Parse a sitemap URL and return the URLs it contains.
+        
+        Args:
+            sitemap_url: URL of the sitemap to parse
+            
+        Returns:
+            List of SitemapUrl objects from the sitemap
+        """
+        if sitemap_url in self.visited_urls:
+            return []
+            
+        self.visited_urls.add(sitemap_url)
+        logger.info(f"Parsing sitemap: {sitemap_url}")
+        
+        try:
+            async with self.session.get(sitemap_url, timeout=self.request_timeout) as response:
+                if response.status != 200:
+                    logger.warning(f"Failed to fetch sitemap {sitemap_url}: HTTP {response.status}")
+                    return []
+                
+                content = await response.text()
+                
+                # Check if this is a sitemap index
+                if "sitemapindex" in content.lower():
+                    return await self._parse_sitemap_index(content, sitemap_url)
+                else:
+                    return await self._parse_standard_sitemap(content, sitemap_url)
+                    
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.error(f"Error parsing sitemap {sitemap_url}: {e}")
+            return []
+    
+    async def _parse_sitemap_index(self, content: str, parent_url: str) -> List[SitemapUrl]:
+        """Parse a sitemap index and return all referenced sitemaps."""
+        try:
+            root = ET.fromstring(content)
+            sitemap_urls = []
+            
+            # Find all sitemap entries
+            for sitemap in root.findall(".//sm:sitemap", SITEMAP_NS):
+                loc_elem = sitemap.find("sm:loc", SITEMAP_NS)
+                if loc_elem is not None and loc_elem.text:
+                    sitemap_url = self._normalize_url(loc_elem.text)
+                    sitemap_urls.append(sitemap_url)
+            
+            # Process all discovered sitemaps in parallel
+            tasks = [self.parse_sitemap(url) for url in sitemap_urls]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Flatten results
+            all_urls = []
+            for result in results:
+                if isinstance(result, list):
+                    all_urls.extend(result)
+                    
+            return all_urls
+            
+        except ET.ParseError as e:
+            logger.error(f"Failed to parse sitemap index {parent_url}: {e}")
+            return []
+    
+    async def _parse_standard_sitemap(self, content: str, sitemap_url: str) -> List[SitemapUrl]:
+        """Parse a standard sitemap and return all URLs."""
+        try:
+            root = ET.fromstring(content)
+            urls = []
+            
+            for url_elem in root.findall(".//sm:url", SITEMAP_NS):
+                sitemap_url = SitemapUrl.from_xml_element(url_elem)
+                if sitemap_url:
+                    urls.append(sitemap_url)
+            
+            return urls
+            
+        except ET.ParseError as e:
+            logger.error(f"Failed to parse sitemap {sitemap_url}: {e}")
+            return []
+    
+    async def to_documents(self) -> List[Document]:
+        """Convert sitemap URLs to Document objects.
+        
+        Returns:
+            List of Document objects representing the sitemap entries.
+        """
+        if not self.sitemap_urls:
+            await self.crawl()
+            
+        documents = []
+        for url in self.sitemap_urls:
+            # Create metadata
+            metadata = DocumentMetadata(
+                source=url.loc,
+                content_type=DocumentType.WEB_PAGE,
+                last_modified=url.lastmod,
+                change_frequency=url.changefreq,
+                priority=url.priority,
+            )
+            
+            # Add additional metadata
+            additional_metadata = {}
+            
+            if url.images:
+                additional_metadata["images"] = url.images
+                
+            if url.videos:
+                additional_metadata["videos"] = url.videos
+                
+            if additional_metadata:
+                metadata.additional_metadata = additional_metadata
+            
+            # Create document with empty content (to be filled by the crawler)
+            document = Document(
+                id=url.loc,  # Use URL as ID
+                content="",  # Content will be filled by the crawler
+                metadata=metadata,
+            )
+            
+            documents.append(document)
+        
+        return documents
+
         self._sitemap_urls: Set[str] = set()
         self._crawled_urls: Set[str] = set()
         self._sitemaps: Dict[str, List[SitemapEntry]] = {}

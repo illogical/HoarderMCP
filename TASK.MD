@@ -26,17 +26,15 @@
 ## In Progress
 
 ### Core Features
+- [ ] Implement a Dockerfile only for the python and package dependencies to run the API and MCP server
 - [ ] Implement sitemap crawling functionality
-- [ ] Add support for additional vector stores (FAISS, Chroma)
-- [ ] Implement caching layer with Redis
-- [ ] Add rate limiting and request throttling
-- [ ] Implement user authentication and API keys
+- [ ] Implement scheduled crawling
+- [ ] Implement incremental updates for crawled content
 
 ### Content Processing
 - [ ] Enhance content extraction for different document types
 - [ ] Implement better chunking strategies for code and markdown
 - [ ] Add language detection for better processing
-- [ ] Implement duplicate content detection
 
 ### Documentation
 - [ ] Create usage examples and tutorials
@@ -47,9 +45,12 @@
 
 ### Features
 - [ ] Add web UI for monitoring and management
-- [ ] Implement scheduled crawling
-- [ ] Implement incremental updates for crawled content
 - [ ] Add support for custom extractors and processors
+- [ ] Implement caching layer with Redis via Docker
+- [ ] Implement user authentication and API keys
+- [ ] Implement duplicate content detection
+- [ ] Add rate limiting and request throttling
+- [ ] Add support for additional vector stores (FAISS, Chroma)
 
 ### Performance
 - [ ] Implement batch processing for large document sets
