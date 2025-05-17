@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: hoardermcp-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - MCP_SERVER_HOST=0.0.0.0
+      - MCP_SERVER_PORT=8000
+      # Add other environment variables from .env as needed
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - milvus-standalone
+      # Add other dependencies as needed
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Milvus for vector storage
+  milvus-standalone:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v2.3.5
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    environment:
+      - ETCD_ENABLED=true
+      - MINIO_ADDRESS=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    depends_on:
+      - etcd
+      - minio
+
+  # ETCD for Milvus metadata
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+
+  # MinIO for Milvus object storage
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2023-01-25T00-19-54Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - minio_data:/data
+    command: minio server /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+volumes:
+  milvus_data:
+  etcd_data:
+  minio_data:

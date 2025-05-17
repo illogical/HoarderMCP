@@ -26,7 +26,6 @@
 ## In Progress
 
 ### Core Features
-- [ ] Implement a Dockerfile only for the python and package dependencies to run the API and MCP server
 - [x] Implement sitemap crawling functionality
   - [x] Create SitemapCrawler class with async support
   - [x] Add support for sitemap indexes and nested sitemaps
@@ -44,6 +43,11 @@
     - [x] Test document conversion
 - [ ] Implement scheduled crawling
 - [ ] Implement incremental updates for crawled content
+- [x] Simplify deployment and dependencies to a single dockerfile for the API and MCP server
+  - [x] Create a multi-stage Dockerfile for production
+  - [x] Set up Docker Compose with all dependencies (Milvus, etcd, MinIO)
+  - [x] Add startup and shutdown scripts
+  - [x] Create deployment documentation
 
 ### Content Processing
 - [ ] Enhance content extraction for different document types
