@@ -240,35 +240,43 @@ class SitemapCrawler:
         return list(sitemap_urls)
     
     async def _check_robots_txt(self) -> List[str]:
-        """Check robots.txt for sitemap references."""
+        """Check robots.txt for sitemap references.
+        
+        Returns:
+            List of sitemap URLs found in robots.txt
+        """
         robots_url = urljoin(self.base_url, "/robots.txt")
         try:
-            async with self.session.get(robots_url, timeout=self.request_timeout) as response:
-                if response.status == 200:
-                    text = await response.text()
-                    # Find all Sitemap directives
-                    sitemap_urls = []
-                    for line in text.splitlines():
-                        line = line.strip()
-                        if line.lower().startswith("sitemap:"):
-                            sitemap_url = line[8:].strip()
-                            sitemap_urls.append(sitemap_url)
-                    return sitemap_urls
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logger.debug(f"Failed to fetch robots.txt: {e}")
-        return []
-    
+            response = await self._make_request(robots_url, method='GET')
+            if not response:
+                return []
+                
+            text = await response.text()
+            # Find all Sitemap directives
+            sitemap_urls = []
+            for line in text.splitlines():
+                line = line.strip()
+                if line.lower().startswith("sitemap:"):
+                    sitemap_url = line[8:].strip()
+                    sitemap_urls.append(sitemap_url)
+            return sitemap_urls
+            
+        except Exception as e:
+            logger.debug(f"Failed to parse robots.txt at {robots_url}: {e}")
+            return []
+            
     async def _check_sitemap_url(self, url: str) -> List[str]:
         """Check if a URL points to a valid sitemap."""
         try:
-            async with self.session.head(url, timeout=self.request_timeout) as response:
-                if response.status == 200 and \
-                   response.headers.get("Content-Type", "").startswith(("application/xml", "text/xml")):
-                    return [url]
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            response = await self._make_request(url, method='HEAD')
+            if response and response.status == 200 and \
+               response.headers.get("Content-Type", "").startswith(("application/xml", "text/xml")):
+                return [url]
+            return []
+        except aiohttp.ClientError as e:
             logger.debug(f"Failed to check sitemap URL {url}: {e}")
-        return []
-    
+            return []
+
     async def crawl(self) -> List[SitemapUrl]:
         """Crawl and parse all discovered sitemaps.
         

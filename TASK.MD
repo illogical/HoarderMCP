@@ -27,7 +27,21 @@
 
 ### Core Features
 - [ ] Implement a Dockerfile only for the python and package dependencies to run the API and MCP server
-- [ ] Implement sitemap crawling functionality
+- [x] Implement sitemap crawling functionality
+  - [x] Create SitemapCrawler class with async support
+  - [x] Add support for sitemap indexes and nested sitemaps
+  - [x] Implement discovery of sitemaps via common locations and robots.txt
+  - [x] Add metadata extraction from sitemap entries
+  - [x] Integrate with main Crawler class
+  - [x] Add comprehensive error handling and retries
+    - [x] Implement exponential backoff with jitter
+    - [x] Handle rate limiting and server errors
+    - [x] Add proper timeout and connection error handling
+  - [x] Add tests for sitemap crawling
+    - [x] Unit tests for SitemapCrawler class
+    - [x] Test error handling and retry logic
+    - [x] Test sitemap discovery and parsing
+    - [x] Test document conversion
 - [ ] Implement scheduled crawling
 - [ ] Implement incremental updates for crawled content
 
