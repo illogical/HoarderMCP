@@ -48,12 +48,13 @@
   - [x] Create deployment documentation
 
 ### Content Processing
-- [ ] Implement better chunking strategies for code and markdown
-  - [ ] Add semantic chunking for markdown with header-based splitting
-  - [ ] Implement code-aware chunking for programming languages
-  - [ ] Add overlap between chunks for better context
-  - [ ] Implement chunk size optimization based on token count
-  - [ ] Add tests for chunking strategies
+- [x] Implement better chunking strategies for code and markdown
+  - [x] Add semantic chunking for markdown with header-based splitting
+  - [x] Implement code-aware chunking for programming languages (Python, C#)
+  - [x] Add overlap between chunks for better context
+  - [x] Implement chunk size optimization based on token count
+  - [x] Add tests for chunking strategies
+  - [x] Integrate chunking with the ingestion service
 
 ### Documentation
 - [ ] Create usage examples and tutorials

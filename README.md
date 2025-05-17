@@ -9,7 +9,11 @@ HoarderMCP is a Model Context Protocol (MCP) server designed for web content cra
 ## Features
 
 - **Web Crawling**: Crawl websites and sitemaps to extract content
-- **Content Processing**: Intelligent chunking for different content types (Markdown, Python, C#)
+- **Advanced Content Processing**:
+  - Semantic chunking for Markdown with header-based splitting
+  - Code-aware chunking for Python and C# with syntax preservation
+  - Configurable chunk sizes and overlap for optimal context
+  - Token-based size optimization
 - **Vector Storage**: Store and search content using vector embeddings
 - **API-First**: RESTful API for easy integration with other services
 - **Asynchronous**: Built with async/await for high performance
@@ -91,6 +95,42 @@ response = httpx.post(
     }
 )
 print(response.json())
+```
+
+### Advanced Chunking Example
+
+```python
+from hoardermcp.core.chunking import ChunkingFactory, ChunkingConfig, ChunkingStrategy
+from hoardermcp.models.document import Document, DocumentMetadata, DocumentType
+
+# Create a markdown document
+markdown_content = """# Title\n\n## Section 1\nContent for section 1\n\n## Section 2\nContent for section 2"""
+doc = Document(
+    id="test",
+    content=markdown_content,
+    metadata=DocumentMetadata(
+        source="example.md",
+        content_type=DocumentType.MARKDOWN
+    )
+)
+
+# Configure chunking
+config = ChunkingConfig(
+    strategy=ChunkingStrategy.SEMANTIC,
+    chunk_size=1000,
+    chunk_overlap=200
+)
+
+# Get appropriate chunker and process document
+chunker = ChunkingFactory.get_chunker(
+    doc_type=DocumentType.MARKDOWN,
+    config=config
+)
+chunks = chunker.chunk_document(doc)
+
+print(f"Document split into {len(chunks)} chunks")
+for i, chunk in enumerate(chunks):
+    print(f"Chunk {i + 1} (length: {len(chunk.content)}): {chunk.content[:50]}...")
 ```
 
 ### Searching Content
